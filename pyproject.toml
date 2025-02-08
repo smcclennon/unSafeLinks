@@ -1,0 +1,18 @@
+# Ruff Python linter configuration
+# See: https://docs.astral.sh/ruff/rules/
+
+[tool.ruff]
+# Maximum characters per line, following PEP 8 guidelines
+line-length = 79
+
+# Rule selection and configuration
+select = ["ALL"]  # Enable all available rules for maximum code quality enforcement
+ignore = ["T201"]  # Allow print() statements - useful for CLI tools and debugging.
+                   # Whilst logging is preferred for production code, print statements
+                   # are acceptable here for direct console output and development
+
+# Path configuration
+include = ["src", "tests"]  # Lint source code and test files
+exclude = ["venv"]          # Skip virtual environment directory
+
+# Additional configuration options can be added here
