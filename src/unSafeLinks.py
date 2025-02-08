@@ -2,8 +2,13 @@
 
 Monitors clipboard or accepts command line input to convert SafeLinks back to
 original URLs.
+
+Licensed under the MIT License (see LICENSE file)
+Copyright (c) 2025 Shiraz McClennon
 """
 
+# Using __future__.annotations allows modern type hint syntax (e.g. str | None)
+# while maintaining compatibility with Python 3.7+, instead of requiring 3.10+
 from __future__ import annotations
 
 import ctypes
@@ -51,6 +56,7 @@ GetClipboardData.restype = w.HANDLE
 # GlobalLock: Locks a global memory object and returns pointer to first byte
 # Parameters: HGLOBAL (handle to global memory)
 # Returns: LPVOID (pointer to memory)
+# Note: Must be paired with GlobalUnlock to prevent memory leaks
 GlobalLock = k32.GlobalLock
 GlobalLock.argtypes = (w.HGLOBAL,)
 GlobalLock.restype = w.LPVOID
@@ -58,6 +64,7 @@ GlobalLock.restype = w.LPVOID
 # GlobalUnlock: Decrements lock count of global memory object
 # Parameters: HGLOBAL (handle to global memory)
 # Returns: BOOL indicating success/failure
+# Note: Must be called once for each successful GlobalLock call
 GlobalUnlock = k32.GlobalUnlock
 GlobalUnlock.argtypes = (w.HGLOBAL,)
 GlobalUnlock.restype = w.BOOL
@@ -117,20 +124,27 @@ def decode_safelink(safelink_url: str) -> str | None:
     """Decode a Microsoft SafeLink URL to its original form.
 
     Args:
-        safelink_url (str): The SafeLink URL to decode
+        safelink_url (str): The SafeLink URL to decode (e.g.
+            https://eur01.safelinks.protection.outlook.com/...)
 
     Returns:
-        str or None: The decoded original URL if successful, None otherwise
+        str or None: The decoded original URL if successful, None if the URL
+            is not a valid SafeLink or lacks the 'url' parameter
+
+    Example:
+        >>> url = "https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fexample.com"
+        >>> decode_safelink(url)
+        'https://example.com'
 
     """
-    # Parse the URL
+    # Parse the URL and extract components
     parsed_url = urllib.parse.urlparse(safelink_url)
 
-    # Extract the 'url' parameter
+    # Extract and decode the 'url' parameter from query string
     query_params = urllib.parse.parse_qs(parsed_url.query)
     original_url = query_params.get("url", [None])[0]
 
-    # Decode the URL
+    # Return decoded URL if found, None otherwise
     if original_url:
         return urllib.parse.unquote(original_url)
     return None
@@ -168,14 +182,25 @@ def set_clipboard_text(text: str) -> None:
     """Set text to the Windows clipboard using Unicode format.
 
     Uses direct Windows API calls to handle memory allocation and clipboard
-    operations.
+    operations. Memory management follows this sequence:
+    1. Allocate global memory (GlobalAlloc)
+    2. Lock memory for writing (GlobalLock)
+    3. Copy data to memory (memmove)
+    4. Unlock memory (GlobalUnlock)
+    5. Set clipboard data - Windows takes ownership of memory
+    6. Free memory if any steps fail (GlobalFree)
 
     Args:
         text (str): The text to be placed on the clipboard
 
     Raises:
-        Exception: If clipboard operations fail
-        MemoryError: If memory allocation fails
+        ClipboardError: If clipboard operations fail (opening, emptying,
+            setting)
+        MemoryAllocationError: If memory allocation or locking fails
+
+    Note:
+        The allocated memory is intentionally not freed after SetClipboardData
+        succeeds, as Windows takes ownership of the memory at that point.
 
     """
     # Convert text to UTF-16 (Windows Unicode format) and ensure proper
@@ -183,7 +208,7 @@ def set_clipboard_text(text: str) -> None:
     text_bytes = (text + "\x00").encode("utf-16le")
     text_size = len(text_bytes)
 
-    # Open the clipboard (retry if initially locked)
+    # Open the clipboard with retries in case another process has it locked
     for _ in range(5):
         if OpenClipboard(None):
             break
