@@ -114,14 +114,26 @@ def get_clipboard_text():
     Retrieves text from the Windows clipboard.
     
     Returns:
-        str: The text content of the clipboard, or empty string if failed
+        str: The text content of the clipboard, or empty string if failed or if content
+             is not text-based
     """
     text = ""
-    if OpenClipboard(None):
-        h_clip_mem = GetClipboardData(CF_UNICODETEXT)
-        text = ctypes.wstring_at(GlobalLock(h_clip_mem))
-        GlobalUnlock(h_clip_mem)
-        CloseClipboard()
+    try:
+        if OpenClipboard(None):
+            try:
+                h_clip_mem = GetClipboardData(CF_UNICODETEXT)
+                if h_clip_mem:  # Check if handle is valid
+                    locked_mem = GlobalLock(h_clip_mem)
+                    if locked_mem:  # Check if memory lock succeeded
+                        try:
+                            text = ctypes.wstring_at(locked_mem)
+                        finally:
+                            GlobalUnlock(h_clip_mem)
+            finally:
+                CloseClipboard()
+    except (OSError, ValueError):
+        # Handles access violations and other potential errors
+        pass
     return text
 
 
